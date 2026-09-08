@@ -28,6 +28,7 @@ const WARDS = [
   { name: 'Rajajinagar', lat: 12.9915, lng: 77.5551 }, { name: 'Hebbal', lat: 13.0358, lng: 77.597 },
 ];
 const STEP_KEYS = ['step_evidence', 'step_describe', 'step_location', 'step_analysis', 'step_confirm'];
+const isStockImageDescription = (value) => /^(an image has been uploaded|the image could not be classified confidently)/i.test((value || '').trim());
 
 export default function ReportIssue() {
   const navigate = useNavigate();
@@ -56,7 +57,7 @@ export default function ReportIssue() {
     try {
       const res = await complaintApi.describeImage(base64);
       if (res?.description) {
-        setDescription((current) => current.trim() ? current : res.description);
+        setDescription((current) => current.trim() && !isStockImageDescription(current) ? current : res.description);
       }
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Image description failed');

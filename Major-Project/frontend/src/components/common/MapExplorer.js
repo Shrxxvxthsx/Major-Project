@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { StylizedCityMap } from '@/components/common/StylizedCityMap';
+import { LeafletCityMap } from '@/components/common/LeafletCityMap';
 import { DepartmentChip, PriorityBadge, StatusBadge } from '@/components/common/Badges';
 import { InlineSpinner } from '@/components/common/Loaders';
 import { EmptyState } from '@/components/common/EmptyState';
@@ -46,7 +46,7 @@ export const MapExplorer = ({ detailBase, showDepartmentFilter = true }) => {
           </Select>
           <span className="ml-auto text-sm text-muted-foreground">{filtered.length} markers</span>
         </div>
-        <StylizedCityMap points={filtered} height={520} selectedId={selected?.id} onSelect={setSelected} />
+        <LeafletCityMap points={filtered} height={520} selectedId={selected?.id} onSelect={setSelected} />
       </div>
 
       <div className="space-y-3">

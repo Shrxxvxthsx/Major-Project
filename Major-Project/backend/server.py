@@ -46,7 +46,7 @@ JWT_ALGO = 'HS256'
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY', '')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
-GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemma-4-31b-it:free')
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3.6-flash')
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('civicpulse')
@@ -841,37 +841,29 @@ async def describe_image_with_vision(image_base64: str) -> str:
         except Exception as exc:
             logger.warning(f'OpenRouter vision describe failed: {exc}')
 
-    # ── 3. Local YOLO model ────────────────────────────────────────────────
+    # ── 3. Local civic vision detector ─────────────────────────────────────
     try:
-        import base64 as _b64
-        import tempfile, pathlib
-        from ultralytics import YOLO as _YOLO
+        from vision.civic_yolo import detect_image_defects
 
-        yolo_path = ROOT_DIR / 'yolov8n.pt'
-        if yolo_path.exists():
-            model = _YOLO(str(yolo_path))
-            img_bytes = _b64.b64decode(b64_clean)
-            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
-                tmp.write(img_bytes)
-                tmp_path = pathlib.Path(tmp.name)
-            results = model(str(tmp_path), verbose=False)
-            tmp_path.unlink(missing_ok=True)
-            labels = []
-            for r in results:
-                for cls_id in (r.boxes.cls.tolist() if r.boxes is not None else []):
-                    name = model.names[int(cls_id)]
-                    if name not in labels:
-                        labels.append(name)
-            if labels:
-                label_str = ', '.join(labels[:6])
-                return (f'The image appears to show a civic issue involving: {label_str}. '
-                        'Please add more details in the description field above.')
+        vision = detect_image_defects(b64_clean)
+        if vision.has_visual_evidence and vision.detected_problem != 'unknown':
+            descriptions = {
+                'vehicle_accident': 'A vehicle collision is visible, with damaged cars overlapping in the roadway and an immediate public-safety risk.',
+                'pothole': 'A pothole or damaged section of road is visible and may create a hazard for vehicles and pedestrians.',
+                'damaged_road': 'The road surface appears damaged and needs inspection by the Roads & Infrastructure department.',
+                'garbage': 'Garbage or discarded waste is visible and should be inspected by Waste Management.',
+                'overflowing_bin': 'An overflowing public bin is visible and requires Waste Management service.',
+                'water_leak': 'A possible water leak is visible and should be checked by Water & Sewage.',
+                'blocked_drain': 'A blocked or overflowing drain appears to be visible and needs urgent inspection.',
+                'broken_streetlight': 'A streetlight or electrical-lighting issue appears to be visible.',
+                'fallen_tree': 'A fallen tree or large branch appears to be obstructing the area.',
+            }
+            return descriptions.get(vision.detected_problem, f"The image contains a possible {vision.detected_problem.replace('_', ' ')} civic issue.")
     except Exception as exc:
-        logger.warning(f'YOLO describe failed: {exc}')
+        logger.warning(f'Civic vision describe failed: {exc}')
 
     # ── 4. Fallback ────────────────────────────────────────────────────────
-    return ('An image has been uploaded. Please describe the civic issue you can see in '
-            'the photo — e.g. pothole, water leak, garbage, broken streetlight, etc.')
+    return 'The image could not be classified confidently. Please add a short description of the visible civic issue.'
 
 
 @api.post('/ai/describe-image')
