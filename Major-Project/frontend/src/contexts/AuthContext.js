@@ -36,13 +36,20 @@ export const AuthProvider = ({ children }) => {
     return u;
   };
 
+  const bootstrapAdmin = async (body) => {
+    const { token, user: u } = await authApi.bootstrapAdmin(body);
+    setToken(token);
+    setUser(u);
+    return u;
+  };
+
   const logout = () => {
     setToken(null);
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, setUser }}>
+    <AuthContext.Provider value={{ user, loading, login, register, bootstrapAdmin, logout, setUser }}>
       {children}
     </AuthContext.Provider>
   );

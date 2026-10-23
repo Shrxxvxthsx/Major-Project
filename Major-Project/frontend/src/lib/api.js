@@ -31,6 +31,7 @@ const unwrap = (p) => p.then((r) => r.data);
 export const authApi = {
   login: (body) => unwrap(api.post('/auth/login', body)),
   register: (body) => unwrap(api.post('/auth/register', body)),
+  bootstrapAdmin: (body) => unwrap(api.post('/auth/bootstrap-admin', body)),
   me: () => unwrap(api.get('/auth/me')),
 };
 

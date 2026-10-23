@@ -105,6 +105,28 @@ class SupabaseCollection:
             on_conflict='collection,id'
         ).execute()
 
+    async def insert_if_absent(self, document: Dict[str, Any]) -> bool:
+        value = deepcopy(document)
+        document_id = str(value.get('id'))
+        value.pop('_id', None)
+        try:
+            self.client.table('civic_documents').insert(
+                {'collection': self.name, 'id': document_id, 'data': value}
+            ).execute()
+            return True
+        except Exception:
+            existing = await self.find_one({'id': document_id})
+            if existing is not None:
+                return existing == value
+            raise
+
+    async def delete_one(self, query: Dict[str, Any]):
+        row = await self.find_one(query)
+        if row is not None:
+            self.client.table('civic_documents').delete().eq(
+                'collection', self.name
+            ).eq('id', str(row['id'])).execute()
+
     async def update_one(self, query: Dict[str, Any], update: Dict[str, Any], upsert: bool = False):
         row = await self.find_one(query)
         if row is None:

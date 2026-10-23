@@ -12,6 +12,7 @@ import { DashboardShell } from '@/components/layout/DashboardShell';
 import Landing from '@/pages/Landing';
 import Login from '@/pages/auth/Login';
 import Register from '@/pages/auth/Register';
+import FirstAdminSetup from '@/pages/auth/FirstAdminSetup';
 
 import CitizenHome from '@/pages/citizen/Home';
 import ReportIssue from '@/pages/citizen/ReportIssue';
@@ -46,6 +47,7 @@ function AppRoutes() {
         <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/admin/setup" element={<FirstAdminSetup />} />
 
           {/* Citizen */}
           <Route

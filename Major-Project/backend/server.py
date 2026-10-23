@@ -257,6 +257,14 @@ class AdminUserCreateIn(BaseModel):
     phone: Optional[str] = None
 
 
+class FirstAdminBootstrapIn(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    name: str = Field(min_length=1, max_length=120)
+    email: EmailStr
+    password: str = Field(min_length=6)
+    phone: Optional[str] = None
+
+
 class LocationIn(BaseModel):
     lat: float
     lng: float
@@ -754,6 +762,98 @@ async def register(body: RegisterIn):
 
     token = create_token(user['id'], role)
     user.pop('_id', None)
+    return {'token': token, 'user': user}
+
+
+@api.post('/auth/bootstrap-admin')
+async def bootstrap_first_admin(body: FirstAdminBootstrapIn):
+    admins = await db.users.find({'role': 'admin'}).to_list(1000)
+    if any(not account.get('is_demo', False) for account in admins):
+        raise HTTPException(status_code=409, detail='Initial administrator setup is already complete')
+
+    ts = iso(now_utc())
+    claim_id = 'first-admin-bootstrap'
+    try:
+        claimed = await db.bootstrap_state.insert_if_absent({
+            'id': claim_id,
+            'claimed_at': ts,
+        })
+    except Exception:
+        logger.exception('Could not claim first administrator setup')
+        raise HTTPException(status_code=503, detail='Account service is temporarily unavailable')
+    if not claimed:
+        raise HTTPException(status_code=409, detail='Initial administrator setup is already complete')
+
+    name = body.name.strip()
+    if not name:
+        await db.bootstrap_state.delete_one({'id': claim_id})
+        raise HTTPException(status_code=422, detail='Name is required')
+
+    email = body.email.lower()
+    auth_user_id = None
+    try:
+        if await db.users.find_one({'email': email}):
+            raise HTTPException(status_code=409, detail='An account with this email already exists')
+
+        auth_user_id = supabase_auth.create_user(email, body.password, {'name': name})
+        user = {
+            'id': auth_user_id,
+            'auth_user_id': auth_user_id,
+            'name': name,
+            'email': email,
+            'role': 'admin',
+            'department': None,
+            'phone': body.phone,
+            'language': 'en',
+            'login_count': 1,
+            'last_login_at': ts,
+            'created_at': ts,
+            'is_demo': False,
+        }
+        await db.users.insert_one(user)
+    except HTTPException:
+        if auth_user_id:
+            try:
+                supabase_auth.delete_user(auth_user_id)
+            except Exception:
+                logger.exception('Failed to remove incomplete bootstrap Auth account %s', auth_user_id)
+        await db.bootstrap_state.delete_one({'id': claim_id})
+        raise
+    except AuthApiError as exc:
+        if auth_user_id:
+            try:
+                supabase_auth.delete_user(auth_user_id)
+            except Exception:
+                logger.exception('Failed to remove incomplete bootstrap Auth account %s', auth_user_id)
+        await db.bootstrap_state.delete_one({'id': claim_id})
+        if exc.status == 422:
+            raise HTTPException(status_code=409, detail='An account with this email already exists')
+        logger.error('Supabase Auth bootstrap failed with status %s', exc.status)
+        raise HTTPException(status_code=503, detail='Account service is temporarily unavailable')
+    except Exception:
+        if auth_user_id:
+            try:
+                supabase_auth.delete_user(auth_user_id)
+            except Exception:
+                logger.exception('Failed to remove incomplete bootstrap Auth account %s', auth_user_id)
+        await db.bootstrap_state.delete_one({'id': claim_id})
+        logger.exception('Initial administrator setup failed')
+        raise HTTPException(status_code=503, detail='Account service is temporarily unavailable')
+
+    await db.login_activity.insert_one({
+        'id': str(uuid.uuid4()),
+        'user_id': auth_user_id,
+        'email': email,
+        'name': name,
+        'role': 'admin',
+        'action': 'initial_admin_bootstrap',
+        'status': 'SUCCESS',
+        'timestamp': ts,
+    })
+    await audit('initial_admin_bootstrap', user, {'email': email})
+
+    token = create_token(auth_user_id, 'admin')
+    user.pop('auth_user_id', None)
     return {'token': token, 'user': user}
 
 
