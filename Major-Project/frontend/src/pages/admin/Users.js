@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ShieldCheck, Building2, User, Search } from 'lucide-react';
+import { ShieldCheck, Building2, User, Search, UserPlus } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { InlineSpinner } from '@/components/common/Loaders';
@@ -38,7 +40,12 @@ export default function AdminUsers() {
           <h1 className="font-display text-2xl font-bold text-foreground">Users &amp; Configuration</h1>
           <p className="text-sm text-muted-foreground">Manage citizens, officers and administrators</p>
         </div>
-        <DemoBadge />
+        <div className="flex items-center gap-2">
+          <DemoBadge />
+          <Button asChild size="sm">
+            <Link to="/admin/create-account"><UserPlus className="mr-2 h-4 w-4" />Create account</Link>
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-3">

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, ListChecks, Map, BarChart3, Database, FileBarChart,
-  Users, LogOut, Menu, X, ShieldCheck,
+  Users, UserPlus, LogOut, Menu, X, ShieldCheck,
 } from 'lucide-react';
 import { Logo } from '@/components/common/Logo';
 import { useAuth } from '@/contexts/AuthContext';
@@ -30,6 +30,7 @@ const ADMIN_NAV = [
   { to: '/admin/reports', icon: FileBarChart, label: 'Intelligence Reports' },
   { to: '/admin/data-sources', icon: Database, label: 'Data Sources' },
   { to: '/admin/users', icon: Users, label: 'Users & Config' },
+  { to: '/admin/create-account', icon: UserPlus, label: 'Create Account' },
 ];
 
 export const DashboardShell = ({ role }) => {

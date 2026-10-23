@@ -73,6 +73,7 @@ export const dataApi = {
   reports: (params) => unwrap(api.get('/reports', { params })),
   report: (id) => unwrap(api.get(`/reports/${id}`)),
   users: () => unwrap(api.get('/admin/users')),
+  createUser: (body) => unwrap(api.post('/admin/users', body)),
   scheduler: () => unwrap(api.get('/scheduler')),
   runScheduler: () => unwrap(api.post('/scheduler/run')),
 };

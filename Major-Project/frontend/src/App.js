@@ -33,6 +33,7 @@ import AdminAnalytics from '@/pages/admin/Analytics';
 import AdminReports from '@/pages/admin/Reports';
 import DataSources from '@/pages/admin/DataSources';
 import AdminUsers from '@/pages/admin/Users';
+import AdminCreateAccount from '@/pages/admin/CreateAccount';
 
 import ComplaintWork from '@/pages/shared/ComplaintWork';
 
@@ -85,6 +86,7 @@ function AppRoutes() {
             <Route path="reports" element={<AdminReports />} />
             <Route path="data-sources" element={<DataSources />} />
             <Route path="users" element={<AdminUsers />} />
+            <Route path="create-account" element={<AdminCreateAccount />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

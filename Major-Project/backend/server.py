@@ -22,7 +22,7 @@ import asyncio
 import requests
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Header
 from dotenv import load_dotenv
@@ -245,6 +245,16 @@ class RegisterIn(BaseModel):
 class LoginIn(BaseModel):
     email: EmailStr
     password: str
+
+
+class AdminUserCreateIn(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    name: str = Field(min_length=1, max_length=120)
+    email: EmailStr
+    password: str = Field(min_length=6)
+    role: Literal['admin', 'officer']
+    department: Optional[str] = None
+    phone: Optional[str] = None
 
 
 class LocationIn(BaseModel):
@@ -1443,6 +1453,73 @@ async def admin_users(user: Dict[str, Any] = Depends(require_roles('admin'))):
         {'_id': 0, 'password_hash': 0, 'auth_user_id': 0},
     ).to_list(500)
     return docs
+
+
+@api.post('/admin/users')
+async def create_admin_user(
+    body: AdminUserCreateIn,
+    user: Dict[str, Any] = Depends(require_roles('admin')),
+):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail='Name is required')
+    if body.role == 'officer' and body.department not in DEPARTMENTS:
+        raise HTTPException(status_code=422, detail='Choose a valid department for the officer')
+
+    email = body.email.lower()
+    if await db.users.find_one({'email': email}):
+        raise HTTPException(status_code=409, detail='An account with this email already exists')
+
+    department = body.department if body.role == 'officer' else None
+    try:
+        auth_user_id = supabase_auth.create_user(email, body.password, {'name': name})
+    except AuthApiError as exc:
+        if exc.status == 422:
+            raise HTTPException(status_code=409, detail='An account with this email already exists')
+        logger.error('Supabase Auth account creation failed with status %s', exc.status)
+        raise HTTPException(status_code=503, detail='Account service is temporarily unavailable')
+    except Exception:
+        logger.exception('Supabase Auth account creation failed')
+        raise HTTPException(status_code=503, detail='Account service is temporarily unavailable')
+
+    ts = iso(now_utc())
+    created_user = {
+        'id': auth_user_id,
+        'auth_user_id': auth_user_id,
+        'name': name,
+        'email': email,
+        'role': body.role,
+        'department': department,
+        'phone': body.phone,
+        'language': 'en',
+        'login_count': 0,
+        'last_login_at': None,
+        'created_at': ts,
+        'is_demo': False,
+    }
+    try:
+        await db.users.insert_one(created_user)
+    except Exception:
+        try:
+            supabase_auth.delete_user(auth_user_id)
+        except Exception:
+            logger.exception('Failed to remove orphaned Supabase Auth account %s', auth_user_id)
+        raise
+
+    await db.login_activity.insert_one({
+        'id': str(uuid.uuid4()),
+        'user_id': auth_user_id,
+        'email': email,
+        'name': name,
+        'role': body.role,
+        'action': 'account_provisioned',
+        'status': 'SUCCESS',
+        'timestamp': ts,
+    })
+    await audit('provision_account', user, {'role': body.role, 'email': email})
+
+    created_user.pop('auth_user_id', None)
+    return {'user': created_user}
 
 
 # ---------------------------------------------------------------------------
