@@ -52,9 +52,20 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger('civicpulse')
 
 app = FastAPI(title='CivicPulse API')
+
+# Build CORS origins: always allow localhost, plus any extra origins from env var
+_cors_env = os.environ.get('CORS_ORIGINS', '')
+_extra_origins = [o.strip() for o in _cors_env.split(',') if o.strip()]
+_allowed_origins = list(set([
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:8000',
+    'https://smart-city-civic.vercel.app',
+] + _extra_origins))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:8000', '*'],
+    allow_origins=_allowed_origins,   # explicit list — never use '*' with credentials
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],

@@ -14,12 +14,14 @@ services:
       - key: JWT_SECRET
         sync: false
       - key: CORS_ORIGINS
-        sync: false
+        sync: false   # Optional additional frontend origins; production Vercel origin is allowed in server.py
       - key: OPENROUTER_API_KEY
         sync: false
       - key: OPENROUTER_MODEL
-        value: google/gemini-2.5-flash
+        value: nvidia/llama-nemotron-embed-vl-1b-v2:free
+      - key: OPENROUTER_VISION_MODEL
+        value: meta-llama/llama-4-scout:free
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
-        value: gemini-3.6-flash
+        value: gemini-2.0-flash
