@@ -6,25 +6,20 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Logo } from '@/components/common/Logo';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
-import { DEPARTMENTS } from '@/lib/constants';
 import { useAuth, homePathForRole } from '@/contexts/AuthContext';
 
 export default function Register() {
   const { register } = useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'citizen', department: '', phone: '' });
+  const [form, setForm] = useState({ name: '', email: '', password: '', phone: '' });
   const [loading, setLoading] = useState(false);
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
 
   const submit = async (e) => {
     e.preventDefault();
-    if (form.role === 'officer' && !form.department) { toast.error('Please select a department'); return; }
     setLoading(true);
     try {
-      const u = await register({ ...form, department: form.role === 'officer' ? form.department : undefined });
+      const u = await register({ ...form, role: 'citizen' });
       toast.success('Account created. Welcome to Smart City by Civic!');
       navigate(homePathForRole(u.role), { replace: true });
     } catch (err) {
@@ -64,33 +59,9 @@ export default function Register() {
                 <Input id="phone" value={form.phone} onChange={(e) => set('phone')(e.target.value)} placeholder="+91…" />
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Account type</Label>
-              <Select value={form.role} onValueChange={set('role')}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="citizen">Citizen</SelectItem>
-                  <SelectItem value="officer">Department Officer</SelectItem>
-                  <SelectItem value="admin">City Administrator</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {form.role === 'officer' && (
-              <div className="space-y-1.5">
-                <Label>Department</Label>
-                <Select value={form.department} onValueChange={set('department')}>
-                  <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
-                  <SelectContent>
-                    {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            {form.role !== 'citizen' && (
-              <p className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
-                In production, officer &amp; admin accounts are provisioned by the city. Open here for demo exploration.
-              </p>
-            )}
+            <p className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+              Officer and administrator accounts are provisioned by city administrators.
+            </p>
             <Button type="submit" className="w-full" disabled={loading}>
               {loading && <Loader2 className="h-4 w-4 animate-spin" />} Create account
             </Button>

@@ -29,7 +29,9 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 import jwt
+from supabase_auth.errors import AuthApiError
 from supabase_db import SupabaseDatabase
+from civic_supabase_auth import SupabaseAuth
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env', override=True)
@@ -40,6 +42,8 @@ load_dotenv(ROOT_DIR / '.env', override=True)
 supabase_url = os.environ['SUPABASE_URL']
 supabase_key = os.environ['SUPABASE_SERVICE_ROLE_KEY']
 db = SupabaseDatabase(supabase_url, supabase_key)
+supabase_auth_key = os.environ['SUPABASE_ANON_KEY']
+supabase_auth = SupabaseAuth(supabase_url, supabase_auth_key, supabase_key)
 
 JWT_SECRET = os.environ.get('JWT_SECRET', 'dev-secret-change-me')
 JWT_ALGO = 'HS256'
@@ -199,7 +203,10 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail='Invalid or expired token')
-    user = await db.users.find_one({'id': payload['sub']}, {'_id': 0, 'password_hash': 0})
+    user = await db.users.find_one(
+        {'id': payload['sub']},
+        {'_id': 0, 'password_hash': 0, 'auth_user_id': 0},
+    )
     if not user:
         raise HTTPException(status_code=401, detail='User not found')
     return user
@@ -673,17 +680,37 @@ async def departments():
 # ---------------------------------------------------------------------------
 @api.post('/auth/register')
 async def register(body: RegisterIn):
+    if body.role != 'citizen':
+        raise HTTPException(
+            status_code=403,
+            detail='Officer and administrator accounts must be provisioned by city administrators',
+        )
     existing = await db.users.find_one({'email': body.email.lower()})
     if existing:
         raise HTTPException(status_code=409, detail='An account with this email already exists')
-    role = body.role if body.role in ['citizen', 'officer', 'admin'] else 'citizen'
-    uid = str(uuid.uuid4())
+    role = 'citizen'
+    email = body.email.lower()
+    try:
+        uid = supabase_auth.create_user(
+            email,
+            body.password,
+            {'name': body.name},
+        )
+    except AuthApiError as exc:
+        if exc.status == 422:
+            raise HTTPException(status_code=409, detail='An account with this email already exists')
+        logger.error('Supabase Auth account creation failed with status %s', exc.status)
+        raise HTTPException(status_code=503, detail='Account service is temporarily unavailable')
+    except Exception:
+        logger.exception('Supabase Auth account creation failed')
+        raise HTTPException(status_code=503, detail='Account service is temporarily unavailable')
+
     ts = iso(now_utc())
     user = {
         'id': uid,
+        'auth_user_id': uid,
         'name': body.name,
-        'email': body.email.lower(),
-        'password_hash': hash_password(body.password),
+        'email': email,
         'role': role,
         'department': body.department if role == 'officer' else None,
         'phone': body.phone,
@@ -693,14 +720,19 @@ async def register(body: RegisterIn):
         'created_at': ts,
         'is_demo': False,
     }
-    # 1. Store user in database
-    await db.users.insert_one(user)
+    try:
+        await db.users.insert_one(user)
+    except Exception:
+        try:
+            supabase_auth.delete_user(uid)
+        except Exception:
+            logger.exception('Failed to remove orphaned Supabase Auth account %s', uid)
+        raise
 
-    # 2. Store registration activity record in login_activity collection
     await db.login_activity.insert_one({
         'id': str(uuid.uuid4()),
         'user_id': uid,
-        'email': user['email'],
+        'email': email,
         'name': user['name'],
         'role': role,
         'action': 'register',
@@ -708,29 +740,77 @@ async def register(body: RegisterIn):
         'timestamp': ts,
     })
 
-    # 3. Store security audit log
-    await audit('register', user, {'role': role, 'email': user['email']})
+    await audit('register', user, {'role': role, 'email': email})
 
     token = create_token(user['id'], role)
-    user.pop('password_hash', None)
     user.pop('_id', None)
     return {'token': token, 'user': user}
 
 
 @api.post('/auth/login')
 async def login(body: LoginIn):
-    user = await db.users.find_one({'email': body.email.lower()})
+    email = body.email.lower()
     ts = iso(now_utc())
-    if not user or not verify_password(body.password, user.get('password_hash', '')):
-        # Log failed login attempt
+    try:
+        auth_user_id = supabase_auth.authenticate(email, body.password)
+    except AuthApiError as exc:
+        if exc.status not in (400, 401):
+            logger.error('Supabase Auth sign-in failed with status %s', exc.status)
+            raise HTTPException(status_code=503, detail='Login service is temporarily unavailable')
+
+        user = await db.users.find_one({'email': email})
+        if user and user.get('password_hash') and verify_password(body.password, user['password_hash']):
+            try:
+                auth_user_id = supabase_auth.migrate_legacy_password(
+                    email,
+                    body.password,
+                    {'name': user.get('name', '')},
+                    user.get('auth_user_id'),
+                )
+                await db.users.update_one(
+                    {'id': user['id']},
+                    {
+                        '$set': {'auth_user_id': auth_user_id},
+                        '$unset': {'password_hash': ''},
+                    },
+                )
+            except Exception:
+                logger.exception('Legacy credential migration failed for user %s', user['id'])
+                raise HTTPException(
+                    status_code=503,
+                    detail='Login service is temporarily unavailable',
+                )
+        else:
+            await db.login_activity.insert_one({
+                'id': str(uuid.uuid4()),
+                'email': email,
+                'action': 'login_failed',
+                'status': 'FAILED',
+                'timestamp': ts,
+            })
+            raise HTTPException(status_code=401, detail='Invalid email or password')
+    except Exception:
+        logger.exception('Supabase Auth sign-in request failed')
+        raise HTTPException(status_code=503, detail='Login service is temporarily unavailable')
+
+    user = await db.users.find_one({'auth_user_id': auth_user_id})
+    if not user:
+        user = await db.users.find_one({'email': email})
+    if not user:
         await db.login_activity.insert_one({
             'id': str(uuid.uuid4()),
-            'email': body.email.lower(),
+            'email': email,
             'action': 'login_failed',
             'status': 'FAILED',
             'timestamp': ts,
         })
         raise HTTPException(status_code=401, detail='Invalid email or password')
+
+    if user.get('auth_user_id') != auth_user_id:
+        await db.users.update_one(
+            {'id': user['id']},
+            {'$set': {'auth_user_id': auth_user_id}},
+        )
 
     # Update user login metrics in database
     login_count = int(user.get('login_count', 0)) + 1
@@ -739,11 +819,10 @@ async def login(body: LoginIn):
         {'$set': {'last_login_at': ts, 'login_count': login_count}}
     )
 
-    # Store successful login activity record in database
     await db.login_activity.insert_one({
         'id': str(uuid.uuid4()),
         'user_id': user['id'],
-        'email': user['email'],
+        'email': email,
         'name': user.get('name', ''),
         'role': user.get('role', 'citizen'),
         'action': 'login',
@@ -751,13 +830,13 @@ async def login(body: LoginIn):
         'timestamp': ts,
     })
 
-    # Record security audit log
     await audit('login', user, {'login_count': login_count})
 
     token = create_token(user['id'], user['role'])
     user['last_login_at'] = ts
     user['login_count'] = login_count
     user.pop('password_hash', None)
+    user.pop('auth_user_id', None)
     user.pop('_id', None)
     return {'token': token, 'user': user}
 
@@ -1102,7 +1181,10 @@ async def assign_complaint(cid: str, body: AssignIn, user: Dict[str, Any] = Depe
     if user['role'] == 'officer' and c.get('department') != user.get('department'):
         raise HTTPException(status_code=403, detail='Not your department')
     officer_id = body.officer_id or user['id']
-    officer = await db.users.find_one({'id': officer_id}, {'_id': 0, 'password_hash': 0})
+    officer = await db.users.find_one(
+        {'id': officer_id},
+        {'_id': 0, 'password_hash': 0, 'auth_user_id': 0},
+    )
     if not officer:
         raise HTTPException(status_code=404, detail='Officer not found')
     await _apply_status(c, 'ASSIGNED', f"Assigned to {officer['name']}", user['name'],
@@ -1356,7 +1438,10 @@ async def report_detail(rid: str, user: Dict[str, Any] = Depends(require_roles('
 
 @api.get('/admin/users')
 async def admin_users(user: Dict[str, Any] = Depends(require_roles('admin'))):
-    docs = await db.users.find({}, {'_id': 0, 'password_hash': 0}).to_list(500)
+    docs = await db.users.find(
+        {},
+        {'_id': 0, 'password_hash': 0, 'auth_user_id': 0},
+    ).to_list(500)
     return docs
 
 

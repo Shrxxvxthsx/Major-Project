@@ -27,6 +27,20 @@ class FakeQuery:
         return SimpleNamespace(data=[])
 
 
+class ExistingRowQuery(FakeQuery):
+    def __init__(self):
+        super().__init__()
+        self.select_data = [{
+            'id': 'user-1',
+            'data': {'id': 'user-1', 'email': 'person@example.com', 'password_hash': 'legacy'},
+        }]
+
+    def execute(self):
+        if self.error:
+            raise self.error
+        return SimpleNamespace(data=self.select_data)
+
+
 class FakeClient:
     def __init__(self, query):
         self.query = query
@@ -66,3 +80,16 @@ def test_user_write_persists_the_password_hash_not_a_plaintext_password():
     assert query.upsert_payload['collection'] == 'users'
     assert query.upsert_payload['data']['password_hash'] == 'salt$digest'
     assert 'password' not in query.upsert_payload['data']
+
+
+def test_update_one_can_remove_legacy_password_hash():
+    query = ExistingRowQuery()
+    collection = SupabaseCollection(FakeClient(query), 'users')
+
+    asyncio.run(collection.update_one(
+        {'id': 'user-1'},
+        {'$set': {'auth_user_id': 'auth-user-1'}, '$unset': {'password_hash': ''}},
+    ))
+
+    assert query.upsert_payload['data']['auth_user_id'] == 'auth-user-1'
+    assert 'password_hash' not in query.upsert_payload['data']

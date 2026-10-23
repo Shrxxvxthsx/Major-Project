@@ -113,6 +113,8 @@ class SupabaseCollection:
             row = deepcopy(query)
         changes = update.get('$set', {})
         row.update(deepcopy(changes))
+        for field in update.get('$unset', {}):
+            row.pop(field, None)
         document_id = str(row.get('id'))
         self.client.table('civic_documents').upsert(
             {'collection': self.name, 'id': document_id, 'data': row},
@@ -123,6 +125,8 @@ class SupabaseCollection:
         rows = [row for row in self._rows() if _matches(row, query)]
         for row in rows:
             row.update(deepcopy(update.get('$set', {})))
+            for field in update.get('$unset', {}):
+                row.pop(field, None)
             self.client.table('civic_documents').upsert(
                 {'collection': self.name, 'id': str(row['id']), 'data': row},
                 on_conflict='collection,id'
