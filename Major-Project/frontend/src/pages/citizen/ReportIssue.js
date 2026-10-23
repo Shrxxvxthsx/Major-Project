@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -20,15 +20,9 @@ import { t } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
-const WARDS = [
-  { name: 'Indiranagar', lat: 12.9719, lng: 77.6412 }, { name: 'Koramangala', lat: 12.9352, lng: 77.6245 },
-  { name: 'Whitefield', lat: 12.9698, lng: 77.75 }, { name: 'Jayanagar', lat: 12.925, lng: 77.5938 },
-  { name: 'Malleshwaram', lat: 13.0035, lng: 77.5647 }, { name: 'HSR Layout', lat: 12.9116, lng: 77.6474 },
-  { name: 'Yelahanka', lat: 13.1007, lng: 77.5963 }, { name: 'BTM Layout', lat: 12.9166, lng: 77.6101 },
-  { name: 'Rajajinagar', lat: 12.9915, lng: 77.5551 }, { name: 'Hebbal', lat: 13.0358, lng: 77.597 },
-];
 const STEP_KEYS = ['step_evidence', 'step_describe', 'step_location', 'step_analysis', 'step_confirm'];
 const isStockImageDescription = (value) => /^(an image has been uploaded|the image could not be classified confidently)/i.test((value || '').trim());
+const GEOCODE_MIN_INTERVAL_MS = 1100;
 
 export default function ReportIssue() {
   const navigate = useNavigate();
@@ -40,6 +34,8 @@ export default function ReportIssue() {
   const [listening, setListening] = useState(false);
   const [describingImage, setDescribingImage] = useState(false);
   const [location, setLocation] = useState(null); // {lat,lng,address,ward}
+  const [locationLookup, setLocationLookup] = useState('');
+  const [locationError, setLocationError] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [ai, setAi] = useState(null);
   const [edited, setEdited] = useState({ title: '', department: '', priority: '' });
@@ -48,6 +44,10 @@ export default function ReportIssue() {
   const recRef = useRef(null);
   const photoInput = useRef(null);
   const videoInput = useRef(null);
+  const geocodeController = useRef(null);
+  const lastGeocodeAt = useRef(0);
+
+  useEffect(() => () => geocodeController.current?.abort(), []);
 
   const speechSupported = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
 
@@ -96,28 +96,69 @@ export default function ReportIssue() {
     recRef.current = rec; rec.start(); setListening(true);
   };
 
+  const selectLocation = async ({ lat, lng }) => {
+    geocodeController.current?.abort();
+    const controller = new AbortController();
+    geocodeController.current = controller;
+    setLocation({ lat, lng, ward: '', address: '' });
+    setLocationError('');
+    setLocationLookup('Finding address and area…');
+
+    const wait = Math.max(0, GEOCODE_MIN_INTERVAL_MS - (Date.now() - lastGeocodeAt.current));
+    if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+    if (controller.signal.aborted) return;
+    lastGeocodeAt.current = Date.now();
+
+    try {
+      const params = new URLSearchParams({
+        format: 'jsonv2',
+        lat: String(lat),
+        lon: String(lng),
+        zoom: '18',
+        addressdetails: '1',
+      });
+      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`, {
+        headers: { 'Accept-Language': 'en' },
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`Address lookup failed (${response.status})`);
+      const result = await response.json();
+      if (result.error) throw new Error(result.error);
+
+      const address = result.address || {};
+      const area = address.ward || address.suburb || address.neighbourhood || address.city_district
+        || address.borough || address.quarter || address.city || address.town || '';
+      if (geocodeController.current !== controller) return;
+      setLocation((current) => current ? {
+        ...current,
+        ward: area,
+        address: result.display_name || '',
+      } : current);
+      if (!area || !result.display_name) {
+        setLocationError('Map details are incomplete. Fill in the missing area or address.');
+      }
+    } catch (error) {
+      if (controller.signal.aborted || geocodeController.current !== controller) return;
+      setLocationError('Could not look up this point. Enter the area and address manually.');
+    } finally {
+      if (geocodeController.current === controller) setLocationLookup('');
+    }
+  };
+
   const useCurrentLocation = () => {
-    if (!navigator.geolocation) { toast.info('Geolocation unavailable — pick a ward instead'); return; }
+    if (!navigator.geolocation) { toast.info('Location is unavailable — choose a point on the map'); return; }
     toast.loading('Getting your location…', { id: 'geo' });
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const { latitude, longitude } = pos.coords;
-        // nearest ward for a readable label
-        let nearest = WARDS[0], best = Infinity;
-        WARDS.forEach((w) => { const d = (w.lat - latitude) ** 2 + (w.lng - longitude) ** 2; if (d < best) { best = d; nearest = w; } });
-        setLocation({ lat: latitude, lng: longitude, ward: nearest.name, address: `Near ${nearest.name}, Bengaluru` });
-        toast.success('Location captured', { id: 'geo' });
+        const { latitude: lat, longitude: lng } = pos.coords;
+        void selectLocation({ lat, lng });
+        toast.success('Location captured. Looking up the address…', { id: 'geo' });
       },
       () => {
-        toast.error('Location denied — pick a ward below', { id: 'geo' });
+        toast.error('Location denied — choose a point on the map', { id: 'geo' });
       },
       { enableHighAccuracy: true, timeout: 8000 },
     );
-  };
-
-  const pickWard = (name) => {
-    const w = WARDS.find((x) => x.name === name);
-    setLocation({ lat: w.lat + (Math.random() - 0.5) * 0.006, lng: w.lng + (Math.random() - 0.5) * 0.006, ward: w.name, address: `${w.name}, Bengaluru` });
   };
 
   const runAnalysis = async () => {
@@ -153,10 +194,10 @@ export default function ReportIssue() {
   const canNext = useMemo(() => {
     if (step === 0) return true; // evidence optional but encouraged
     if (step === 1) return description.trim().length >= 3 || !!image;
-    if (step === 2) return !!location;
+    if (step === 2) return !!location && !!location.ward.trim() && !!location.address.trim() && !locationLookup;
     if (step === 3) return !analyzing && !!ai && !!edited.department && !!edited.priority;
     return true;
-  }, [step, description, image, location, ai, edited, analyzing]);
+  }, [step, description, image, location, locationLookup, ai, edited, analyzing]);
 
   const submit = async () => {
     setSubmitting(true);
@@ -285,28 +326,48 @@ export default function ReportIssue() {
       {/* STEP 2: Location */}
       {step === 2 && (
         <div className="space-y-4 animate-fade-in">
-          <p className="text-sm text-muted-foreground">Confirm where the issue is. Use your GPS or choose a ward.</p>
+          <p className="text-sm text-muted-foreground">Click the map to place the pin on the exact issue location. The address and area are looked up from that point.</p>
           <Button onClick={useCurrentLocation} variant="outline" className="w-full gap-2"><Navigation className="h-4 w-4" /> Use my current location</Button>
+          <StylizedCityMap
+            height={280}
+            showHotspots={false}
+            pickerHint="Click map to set exact location"
+            onMapClick={(coords) => { void selectLocation(coords); }}
+            points={location ? [{
+              id: 'reported-location',
+              title: description || 'Reported issue',
+              priority: edited.priority || 'MEDIUM',
+              department: 'Roads & Infrastructure',
+              location,
+            }] : []}
+          />
+          {locationLookup && <p className="text-sm text-muted-foreground">{locationLookup}</p>}
           <div className="space-y-1.5">
-            <Label>Ward / Area</Label>
-            <Select value={location?.ward || ''} onValueChange={pickWard}>
-              <SelectTrigger><SelectValue placeholder="Select ward" /></SelectTrigger>
-              <SelectContent>{WARDS.map((w) => <SelectItem key={w.name} value={w.name}>{w.name}</SelectItem>)}</SelectContent>
-            </Select>
+            <Label htmlFor="location-area">Ward / Area</Label>
+            <Input
+              id="location-area"
+              value={location?.ward || ''}
+              onChange={(e) => setLocation((current) => current ? { ...current, ward: e.target.value } : current)}
+              placeholder={location ? 'Area from map or enter the ward' : 'Select a point on the map first'}
+              disabled={!location || !!locationLookup}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="location-address">Exact address / landmark</Label>
+            <Input
+              id="location-address"
+              value={location?.address || ''}
+              onChange={(e) => setLocation((current) => current ? { ...current, address: e.target.value } : current)}
+              placeholder={location ? 'Address from map or enter a nearby landmark' : 'Select a point on the map first'}
+              disabled={!location || !!locationLookup}
+            />
           </div>
           {location && (
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label>Address / landmark</Label>
-                <Input value={location.address} onChange={(e) => setLocation({ ...location, address: e.target.value })} />
-              </div>
-              <StylizedCityMap height={220} showHotspots={false}
-                points={[{ id: 'me', title: description || 'Reported issue', priority: edited.priority || 'MEDIUM', department: 'Roads & Infrastructure', location }]} />
-              <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
-                <MapPin className="h-3.5 w-3.5" /> {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
-              </p>
-            </div>
+            <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
+              <MapPin className="h-3.5 w-3.5" /> {location.lat.toFixed(6)}, {location.lng.toFixed(6)}
+            </p>
           )}
+          {locationError && <p role="alert" className="text-sm text-destructive">{locationError}</p>}
         </div>
       )}
 

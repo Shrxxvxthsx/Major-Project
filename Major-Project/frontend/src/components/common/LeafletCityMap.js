@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo } from 'react';
 import { Activity, MapPinned } from 'lucide-react';
-import { Circle, CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet';
+import { Circle, CircleMarker, MapContainer, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { PRIORITY_META } from '@/lib/constants';
 import { cn } from '@/lib/utils';
@@ -24,7 +24,14 @@ const MapViewport = ({ points }) => {
   return null;
 };
 
-export const LeafletCityMap = ({ points = [], onSelect, selectedId, showHotspots = true, className, height = 460 }) => {
+const MapClickHandler = ({ onMapClick }) => {
+  useMapEvents({
+    click: (event) => onMapClick?.({ lat: event.latlng.lat, lng: event.latlng.lng }),
+  });
+  return null;
+};
+
+export const LeafletCityMap = ({ points = [], onSelect, onMapClick, pickerHint, selectedId, showHotspots = true, className, height = 460 }) => {
   const validPoints = useMemo(() => points.filter((point) => (
     Number.isFinite(Number(point?.location?.lat)) && Number.isFinite(Number(point?.location?.lng))
   )), [points]);
@@ -57,12 +64,14 @@ export const LeafletCityMap = ({ points = [], onSelect, selectedId, showHotspots
         </div>
         <div className="inline-flex items-center gap-1.5 rounded-full border border-success/20 bg-success/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-success"><Activity className="h-3 w-3" /> {validPoints.length} active</div>
       </div>
-      <MapContainer center={BENGALURU} zoom={11} scrollWheelZoom={height > 240} zoomControl={height > 240} style={{ height, width: '100%' }}>
+      <MapContainer center={BENGALURU} zoom={11} scrollWheelZoom={height > 240} zoomControl={height > 240}
+        className={onMapClick ? 'cursor-crosshair' : undefined} style={{ height, width: '100%' }}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <MapViewport points={validPoints} />
+        {onMapClick && <MapClickHandler onMapClick={onMapClick} />}
         {hotspots.map((hotspot) => (
           <Circle
             key={hotspot.ward}
@@ -93,6 +102,11 @@ export const LeafletCityMap = ({ points = [], onSelect, selectedId, showHotspots
           );
         })}
       </MapContainer>
+      {pickerHint && (
+        <div className="pointer-events-none absolute left-3 top-[4.25rem] z-[500] rounded-lg border border-border bg-card/90 px-2.5 py-1.5 text-[11px] font-medium text-foreground shadow-sm backdrop-blur">
+          {pickerHint}
+        </div>
+      )}
       <div className="absolute bottom-3 left-3 z-[500] flex flex-wrap gap-x-3 gap-y-1 rounded-xl border border-border bg-card/90 px-3 py-2 text-[11px] font-medium backdrop-blur">
         {Object.keys(PRIORITY_META).map((priority) => <span key={priority} className="inline-flex items-center gap-1.5 text-muted-foreground"><span className="h-2.5 w-2.5 rounded-full" style={{ background: PRIORITY_COLORS[priority] }} />{PRIORITY_META[priority].label}</span>)}
       </div>
