@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://major-project-8c7f.onrender.com').replace(/\/+$/, '');
 export const API_BASE = `${BACKEND_URL}/api`;
 
 const TOKEN_KEY = 'cp_token';

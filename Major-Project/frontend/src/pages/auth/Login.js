@@ -31,7 +31,8 @@ export default function Login() {
       toast.success(`Welcome back, ${u.name.split(' ')[0]}`);
       navigate(location.state?.from || homePathForRole(u.role), { replace: true });
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Login failed');
+      const unavailable = err?.code === 'ERR_NETWORK' || err?.response?.status >= 500;
+      toast.error(err?.response?.data?.detail || (unavailable ? 'Login service is temporarily unavailable. Please try again shortly.' : 'Login failed'));
     } finally {
       setLoading(false);
     }

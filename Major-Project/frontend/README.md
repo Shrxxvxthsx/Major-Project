@@ -29,6 +29,10 @@ Your app is ready to be deployed!
 
 See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
 
+### Production API configuration
+
+The frontend defaults to the Render API at `https://major-project-8c7f.onrender.com`. To use another backend, set `REACT_APP_BACKEND_URL` in the Vercel project settings and redeploy. The production frontend origin `https://smart-city-civic.vercel.app` is allowed by the backend; if the frontend domain changes, add its exact origin to the backend's `CORS_ORIGINS` variable in Render.
+
 ### `npm run eject`
 
 **Note: this is a one-way operation. Once you `eject`, you can't go back!**
