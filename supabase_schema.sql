@@ -1,7 +1,7 @@
 -- ==============================================================================
 -- CivicPulse — Supabase PostgreSQL Schema & Relational Views
 -- ==============================================================================
--- Run this script in the Supabase SQL Editor (https://supabase.com/dashboard/project/cwzapcranftucwdawukn/sql)
+-- Run this script in the Supabase SQL Editor (https://supabase.com/dashboard/project/dgdtwrlnbnrmlkjsmdcu/sql)
 -- This creates the core JSONB document store and auto-extracting Relational Views
 -- so you can view Complaints, Users, AI Predictions, and Reports in the Table Editor.
 
