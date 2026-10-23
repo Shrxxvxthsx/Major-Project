@@ -1,12 +1,9 @@
 """Small document repository backed by a Supabase JSONB table."""
 import re
-import logging
 from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional
 
 from supabase import Client, create_client
-
-logger = logging.getLogger("civicpulse.supabase")
 
 _MISSING = object()
 
@@ -80,24 +77,13 @@ class SupabaseCursor:
 
 
 class SupabaseCollection:
-    _cache: Dict[str, List[Dict[str, Any]]] = {}
-
     def __init__(self, client: Client, name: str):
         self.client = client
         self.name = name
 
     def _rows(self) -> List[Dict[str, Any]]:
-        try:
-            response = self.client.table('civic_documents').select('id,data').eq('collection', self.name).execute()
-            data = [dict(row.get('data') or {}, id=row.get('id')) for row in (response.data or [])]
-            if data or self.name not in SupabaseCollection._cache:
-                SupabaseCollection._cache[self.name] = deepcopy(data)
-            return data
-        except Exception as e:
-            logger.debug("Supabase read fallback for collection '%s': %s", self.name, e)
-            if self.name in SupabaseCollection._cache:
-                return deepcopy(SupabaseCollection._cache[self.name])
-            return []
+        response = self.client.table('civic_documents').select('id,data').eq('collection', self.name).execute()
+        return [dict(row.get('data') or {}, id=row.get('id')) for row in (response.data or [])]
 
     async def find_one(self, query: Dict[str, Any], projection: Optional[Dict[str, Any]] = None):
         for row in self._rows():
@@ -114,22 +100,10 @@ class SupabaseCollection:
         value = deepcopy(document)
         document_id = str(value.get('id'))
         value.pop('_id', None)
-        if self.name not in SupabaseCollection._cache:
-            SupabaseCollection._cache[self.name] = []
-        # Update or append in cache
-        existing_idx = next((i for i, d in enumerate(SupabaseCollection._cache[self.name]) if str(d.get('id')) == document_id), None)
-        if existing_idx is not None:
-            SupabaseCollection._cache[self.name][existing_idx] = dict(value, id=document_id)
-        else:
-            SupabaseCollection._cache[self.name].append(dict(value, id=document_id))
-
-        try:
-            self.client.table('civic_documents').upsert(
-                {'collection': self.name, 'id': document_id, 'data': value},
-                on_conflict='collection,id'
-            ).execute()
-        except Exception as e:
-            logger.warning("Supabase insert_one warning for %s/%s: %s", self.name, document_id, e)
+        self.client.table('civic_documents').upsert(
+            {'collection': self.name, 'id': document_id, 'data': value},
+            on_conflict='collection,id'
+        ).execute()
 
     async def update_one(self, query: Dict[str, Any], update: Dict[str, Any], upsert: bool = False):
         row = await self.find_one(query)
@@ -140,30 +114,19 @@ class SupabaseCollection:
         changes = update.get('$set', {})
         row.update(deepcopy(changes))
         document_id = str(row.get('id'))
-        if self.name in SupabaseCollection._cache:
-            for idx, r in enumerate(SupabaseCollection._cache[self.name]):
-                if str(r.get('id')) == document_id:
-                    SupabaseCollection._cache[self.name][idx] = deepcopy(row)
-                    break
-        try:
-            self.client.table('civic_documents').upsert(
-                {'collection': self.name, 'id': document_id, 'data': row},
-                on_conflict='collection,id'
-            ).execute()
-        except Exception as e:
-            logger.warning("Supabase update_one warning for %s/%s: %s", self.name, document_id, e)
+        self.client.table('civic_documents').upsert(
+            {'collection': self.name, 'id': document_id, 'data': row},
+            on_conflict='collection,id'
+        ).execute()
 
     async def update_many(self, query: Dict[str, Any], update: Dict[str, Any]):
         rows = [row for row in self._rows() if _matches(row, query)]
         for row in rows:
             row.update(deepcopy(update.get('$set', {})))
-            try:
-                self.client.table('civic_documents').upsert(
-                    {'collection': self.name, 'id': str(row['id']), 'data': row},
-                    on_conflict='collection,id'
-                ).execute()
-            except Exception as e:
-                logger.warning("Supabase update_many warning for %s: %s", self.name, e)
+            self.client.table('civic_documents').upsert(
+                {'collection': self.name, 'id': str(row['id']), 'data': row},
+                on_conflict='collection,id'
+            ).execute()
 
     async def count_documents(self, query: Optional[Dict[str, Any]] = None):
         return sum(1 for row in self._rows() if _matches(row, query or {}))
