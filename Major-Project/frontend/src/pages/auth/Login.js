@@ -99,9 +99,6 @@ export default function Login() {
           <p className="mt-6 text-center text-sm text-muted-foreground">
             New here? <Link to="/register" className="font-semibold text-primary hover:underline">Create an account</Link>
           </p>
-          <p className="mt-2 text-center text-sm text-muted-foreground">
-            First-time setup? <Link to="/admin/setup" className="font-semibold text-primary hover:underline">Create the initial admin account</Link>
-          </p>
         </div>
       </div>
     </div>
