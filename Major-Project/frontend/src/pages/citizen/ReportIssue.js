@@ -70,9 +70,8 @@ export default function ReportIssue() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const b64 = await fileToCompressedBase64(file);
+      const b64 = await fileToCompressedBase64(file, 768, 0.68);
       setImage(b64);
-      await describeImageFromUpload(b64);
     } catch { toast.error('Could not read image'); }
   };
   const handleVideo = (e) => {
